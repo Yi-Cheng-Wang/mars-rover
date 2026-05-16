@@ -4,7 +4,7 @@ import struct
 # 1. Basic Settings & System Configuration
 # ==========================================
 class CAN_CONFIG:
-    PORT = '/dev/ttyUSB0'
+    PORT = 'COM14'
     BAUDRATE = 2000000
     TIMEOUT = 0.1
     WHEEL_CAN_IDS = [0x01, 0x02, 0x03, 0x04]
@@ -143,16 +143,19 @@ class BriterMotorProtocol:
 class DRIVE_MODES:
     # P 模式：加速度(Accel), 減速度(Decel), 目標速度(Target erpm)
     # P 為了不超速，仍保有減速度來進行速限控制
-    P1 = {"accel": 200,  "decel": 500,  "speed": 1000}
-    P2 = {"accel": 500,  "decel": 500,  "speed": 2500}
-    P3 = {"accel": 1000, "decel": 1000, "speed": 5000}
+    P1 = {"accel": 200,  "decel": 100,  "speed": 1000}
+    P2 = {"accel": 250,  "decel": 100,  "speed": 2000}
+    P3 = {"accel": 300, "decel": 100, "speed": 3000}
+    P4 = {"accel": 400, "decel": 100, "speed": 4000}
+    P5 = {"accel": 500, "decel": 100, "speed": 5000}
 
 class BRAKE_MODES:
     # B 模式：減速度(Decel), 煞車電流(Brake Current)
     # 規定：B 模式加速度(Accel) 永遠為 0
-    B1 = {"decel": 500,  "current": 100}
-    B2 = {"decel": 1500, "current": 300}
-    B3 = {"decel": 3000, "current": 600}
+    B1 = {"decel": 200}
+    B2 = {"decel": 500}
+    B3 = {"decel": 1000}
+    B4 = {"decel": 1500}
 
 class NEUTRAL_MODE:
     # N 模式：墮行 (Coasting)
@@ -163,7 +166,7 @@ class NEUTRAL_MODE:
 class EMERGENCY_MODE:
     # EB 模式
     DECEL = 100000
-    CURRENT = 1000
+    CURRENT = 10000
     SPEED = 0
 
 # ==========================================
