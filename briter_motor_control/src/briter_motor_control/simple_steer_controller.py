@@ -7,17 +7,17 @@ from can_reader import MotorReader
 from params import CAN_CONFIG, BriterMotorProtocol as Protocol
 
 # ==========================================
-# 定義速度段位 (ERPM)
+# Define speed steps (ERPM)
 # ==========================================
 SPEED_STEPS = [-2000, -1500, -1000, -500, 0, 500, 1000, 1500, 2000]
-ZERO_INDEX = 4  # 陣列中 0 的位置
+ZERO_INDEX = 4  # Index corresponding to 0 ERPM
 
-# 預設加減速度
+# Default acceleration and deceleration
 DEFAULT_ACCEL = 500
 DEFAULT_DECEL = 1000
 
-def display_dashboard(steps, tgt_idx, act_idx, target_wheel, r_speed):
-    """沿用原版的儀表板風格，適配新數值陣列"""
+def display_dashboard(steps, tgt_idx, act_idx, ui_wheel, r_speed):
+    """Retain the original dashboard style, adapted for the new numerical array"""
     dash = ""
     for i, speed in enumerate(steps):
         if i == tgt_idx and i == act_idx:
@@ -29,10 +29,10 @@ def display_dashboard(steps, tgt_idx, act_idx, target_wheel, r_speed):
         else:
             dash += f"  {speed}  "
             
-    print(f"\rControl Wheel:{target_wheel} | Gear:{dash}| Speed(Real): {r_speed:4.0f} \033[K", end="")
+    print(f"\rUI Wheel:{ui_wheel} | Gear:{dash}| Speed(Real): {r_speed:4.0f} \033[K", end="")
 
 # ==========================================
-# 簡化版傳動控制器 (保留原版執行緒架構)
+# Simplified Transmission Controller
 # ==========================================
 class SimpleThreadedController:
     def __init__(self, ui_wheel_idx=0):
@@ -42,64 +42,77 @@ class SimpleThreadedController:
         self.writer = MotorController(self.bus)
         self.reader = MotorReader(self.bus)
         
-        # 狀態字典 (支援 4 輪獨立狀態)
-        self.raw_target_idx = {i: ZERO_INDEX for i in range(4)}
-        self.active_gear_idx = {i: ZERO_INDEX for i in range(4)}
+        # State dictionaries (Supports 6 independent wheels)
+        self.raw_target_idx = {i: ZERO_INDEX for i in range(6)}
+        self.active_gear_idx = {i: ZERO_INDEX for i in range(6)}
         
-        # 保留原版的重傳與同步機制
-        self.retransmit_queue = {i: 0 for i in range(4)}
+        self.retransmit_queue = {i: 0 for i in range(6)}
         self.sync_timer = 0
         
         self.running = True
         self.smart_thread = threading.Thread(target=self._smart_transmission_loop, daemon=True)
         self.smart_thread.start()
-        print("\n[System] Threaded simple transmission started. [CAN Write Loop & Sync] enabled.")
+        print("\n[System] Threaded simple transmission started. [CAN Write Loop & Sync] enabled for 6 wheels.")
 
     def set_target_gear(self, index: int, step_idx: int):
-        """設定目標速度索引"""
+        """Set target speed index"""
         if 0 <= step_idx < len(SPEED_STEPS):
             self.raw_target_idx[index] = step_idx
 
-    def _apply_gear(self, index: int, target_erpm: int):
-        """實體層 CAN 寫入指令"""
+    def _apply_gear(self, index: int, target_erpm: int, is_sync: bool = False):
+        """
+        Physical layer CAN write command.
+        [Fix applied]: Only send Accel/Decel parameters when actively shifting gears.
+        Do NOT send them during routine synchronization (is_sync=True) to prevent 
+        motor controller PID reset/twitching at 0 ERPM.
+        """
+        # Ensure your CAN_CONFIG.WHEEL_CAN_IDS in params.py has at least 6 items!
         can_id = CAN_CONFIG.WHEEL_CAN_IDS[index]
-        self.bus.send_frame(Protocol.pack_command_frame(can_id, Protocol.CMD_SET_ACCEL_SPEED, DEFAULT_ACCEL))
-        self.bus.send_frame(Protocol.pack_command_frame(can_id, Protocol.CMD_SET_DECEL_SPEED, DEFAULT_DECEL))
+        
+        if not is_sync:
+            # Only update acceleration and deceleration when the target actually changes
+            self.bus.send_frame(Protocol.pack_command_frame(can_id, Protocol.CMD_SET_ACCEL_SPEED, DEFAULT_ACCEL))
+            self.bus.send_frame(Protocol.pack_command_frame(can_id, Protocol.CMD_SET_DECEL_SPEED, DEFAULT_DECEL))
+            
+        # Always send the target speed (acts as the heartbeat during sync)
         self.bus.send_frame(Protocol.pack_command_frame(can_id, Protocol.CMD_SET_SPEED, target_erpm))
 
     def _smart_transmission_loop(self):
-        """完全引用原版的 CAN 寫入執行緒邏輯"""
+        """Fully references the original CAN write thread logic"""
         while self.running:
-            # 1. 同步計時器 (每 15 個 tick 強制發送一次訊號，確保馬達不斷線)
+            # 1. Sync timer (Force send signal every 15 ticks)
             self.sync_timer += 1
             force_sync = False
             if self.sync_timer >= 15:
                 force_sync = True
                 self.sync_timer = 0
             
-            for w in range(4):
+            # Loop through all 6 wheels
+            for w in range(6):
                 tgt_idx = self.raw_target_idx[w]
                 act_idx_before = self.active_gear_idx[w]
                 
                 gear_changed = False
                 
-                # 2. 狀態切換判定
+                # 2. State change detection
                 if act_idx_before != tgt_idx:
                     self.active_gear_idx[w] = tgt_idx
                     gear_changed = True
                 
-                # 3. 觸發變檔重傳機制 (確保指令確實抵達)
+                # 3. Trigger gear shift retransmission mechanism
                 if gear_changed:
                     self.retransmit_queue[w] = 3
                     
-                # 4. 實體層寫入 (Physical layer write)
+                # 4. Physical layer write
                 if self.retransmit_queue[w] > 0:
-                    self._apply_gear(w, SPEED_STEPS[self.active_gear_idx[w]])
+                    # Not a sync, it's a real gear shift -> send full parameters (is_sync=False)
+                    self._apply_gear(w, SPEED_STEPS[self.active_gear_idx[w]], is_sync=False)
                     self.retransmit_queue[w] -= 1
                 elif force_sync:
-                    self._apply_gear(w, SPEED_STEPS[self.active_gear_idx[w]])
+                    # Just a routine sync heartbeat -> only send speed command (is_sync=True)
+                    self._apply_gear(w, SPEED_STEPS[self.active_gear_idx[w]], is_sync=True)
 
-            # 更新 UI (讀取真實馬達速度)
+            # Update UI
             ui_w = self.ui_wheel_idx
             real_speed = self.reader.cur_speeds[ui_w]
             
@@ -111,7 +124,6 @@ class SimpleThreadedController:
                 real_speed
             )
             
-            # 原版迴圈延遲
             time.sleep(0.02)
 
     def stop_all(self):
@@ -121,14 +133,17 @@ class SimpleThreadedController:
         self.bus.close()
 
 # ==========================================
-# 互動測試模式 (完全引用原版鍵盤邏輯)
+# Interactive test mode
 # ==========================================
 if __name__ == "__main__":
-    TARGET_WHEEL = 0
-    steer = SimpleThreadedController(ui_wheel_idx=TARGET_WHEEL)
+    UI_TARGET_WHEEL = 0  # Wheel to monitor on the dashboard
+    steer = SimpleThreadedController(ui_wheel_idx=UI_TARGET_WHEEL)
     
     current_step_idx = ZERO_INDEX
-    steer.set_target_gear(TARGET_WHEEL, current_step_idx)
+    
+    # Initialize all 6 wheels to zero
+    for i in range(6):
+        steer.set_target_gear(i, current_step_idx)
     
     print("\n=======================================================")
     print("  [↑] Upshift (Accelerate)")
@@ -137,7 +152,6 @@ if __name__ == "__main__":
     print("  [q] / [Esc] Emergency stop and exit")
     print("=======================================================\n")
     
-    # 沿用原版的按鍵計數器
     key_counters = {'up': 0, 'down': 0}
     last_space = False
     
@@ -176,17 +190,16 @@ if __name__ == "__main__":
                 key_counters['down'] = 0
                 
             if changed:
-                # 若只需控制單輪，保持 TARGET_WHEEL。若要四輪連動，可在此處改成迴圈 set_target_gear
-                steer.set_target_gear(TARGET_WHEEL, current_step_idx)
+                # Apply the target gear to ALL 6 wheels
+                for w in range(6):
+                    steer.set_target_gear(w, current_step_idx)
             
-            # 原版鍵盤掃描延遲
             time.sleep(0.05)
 
     except KeyboardInterrupt:
         print("\n\n[System] User forced interrupt test")
     finally:
-        # 強制歸零再退出
-        for i in range(4):
+        for i in range(6):
             steer.set_target_gear(i, ZERO_INDEX)
         time.sleep(0.5) 
         steer.stop_all()
