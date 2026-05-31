@@ -50,14 +50,12 @@ class CrossPlatformKeyReader:
             tty.setcbreak(self.fd)
 
     def get_key(self):
-        """Non-blocking key read. Returns 'up', 'down', 'space', 'q', 'esc', or None."""
+        """Non-blocking key read. Returns 'w', 's', 'space', 'q', 'esc', or None."""
         if self.is_windows:
             if msvcrt.kbhit():
                 ch = msvcrt.getch()
-                if ch in (b'\x00', b'\xe0'):  # Arrow key prefix in Windows
-                    ch2 = msvcrt.getch()
-                    if ch2 == b'H': return 'up'
-                    elif ch2 == b'P': return 'down'
+                if ch.lower() == b'w': return 'w'
+                elif ch.lower() == b's': return 's'
                 elif ch == b' ': return 'space'
                 elif ch.lower() == b'q': return 'q'
                 elif ch == b'\x1b': return 'esc'
@@ -65,15 +63,11 @@ class CrossPlatformKeyReader:
         else:
             if select.select([sys.stdin], [], [], 0.0)[0]:
                 ch = sys.stdin.read(1)
-                if ch == '\x1b':  # Escape sequence for arrow keys
-                    if select.select([sys.stdin], [], [], 0.01)[0]:
-                        seq = sys.stdin.read(2)
-                        if seq == '[A': return 'up'
-                        elif seq == '[B': return 'down'
-                    else:
-                        return 'esc'
+                if ch.lower() == 'w': return 'w'
+                elif ch.lower() == 's': return 's'
                 elif ch == ' ': return 'space'
                 elif ch.lower() == 'q': return 'q'
+                elif ch == '\x1b': return 'esc'
                 elif ch == '\x03': raise KeyboardInterrupt # Ctrl+C
         return None
 
@@ -172,10 +166,10 @@ if __name__ == "__main__":
         steer.set_target_gear(i, current_step_idx)
     
     print("\n=======================================================")
-    print("  [↑] Upshift (Accelerate)")
-    print("  [↓] Downshift (Brake/Reverse)")
+    print("  [W] Upshift (Accelerate)")
+    print("  [S] Downshift (Brake/Reverse)")
     print("  [Space] Instant Stop (0 ERPM)")
-    print("  [q] / [Esc] Emergency stop and exit")
+    print("  [Q] / [Esc] Emergency stop and exit")
     print("=======================================================\n")
     
     key_reader = CrossPlatformKeyReader()
@@ -197,14 +191,14 @@ if __name__ == "__main__":
                 current_step_idx = ZERO_INDEX
                 changed = True
                 
-            elif key == 'up':
+            elif key == 'w':
                 if current_time - last_shift_time > shift_cooldown:
                     if current_step_idx < len(SPEED_STEPS) - 1:
                         current_step_idx += 1
                         changed = True
                         last_shift_time = current_time
                         
-            elif key == 'down':
+            elif key == 's':
                 if current_time - last_shift_time > shift_cooldown:
                     if current_step_idx > 0:
                         current_step_idx -= 1
