@@ -18,11 +18,11 @@ else:
 # ==========================================
 # Define speed steps (ERPM)
 # ==========================================
-SPEED_STEPS = [-2000, -1500, -1000, -500, 0, 500, 1000, 1500, 2000]
-ZERO_INDEX = 4  # Index corresponding to 0 ERPM
+SPEED_STEPS = [-2000, -1500, -1000, 0, 1000, 1500, 2000]
+ZERO_INDEX = 3  # Index corresponding to 0 ERPM
 
 DEFAULT_ACCEL = 500
-DEFAULT_DECEL = 200
+DEFAULT_DECEL = 2000
 
 def display_dashboard(steps, tgt_idx, act_idx, ui_wheel, r_speed):
     dash = ""
